@@ -9,7 +9,7 @@ This repository only hosts the current access page. It is intentionally separate
 After GitHub Pages is enabled for this repository, use:
 
 ```text
-https://wang-ao-scu.github.io/matnexus/
+https://wang-ao-scu.github.io/MatNexus/
 ```
 
 The page shows:
@@ -35,7 +35,7 @@ Expected output fields:
 INTERNAL_URL=http://127.0.0.1:8501
 EXTERNAL_URL=https://*.trycloudflare.com
 DISTRIBUTION_PUBLISH=SUCCESS
-DISTRIBUTION_PAGE=https://wang-ao-scu.github.io/matnexus/
+DISTRIBUTION_PAGE=https://wang-ao-scu.github.io/MatNexus/
 ```
 
 Stop processes started by the script:

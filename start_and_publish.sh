@@ -51,7 +51,7 @@ echo "EXTERNAL_URL=$EXTERNAL_URL"
 
 if python "$BASE_DIR/scripts/update_distribution_page.py" --url "$EXTERNAL_URL" --site-dir "$SITE_DIR" --publish-repo "$PUBLISH_REPO" --publish-subdir . --push; then
   echo "DISTRIBUTION_PUBLISH=SUCCESS"
-  echo "DISTRIBUTION_PAGE=https://wang-ao-scu.github.io/matnexus/"
+  echo "DISTRIBUTION_PAGE=https://wang-ao-scu.github.io/MatNexus/"
 else
   echo "DISTRIBUTION_PUBLISH=FAILED"
   exit 1

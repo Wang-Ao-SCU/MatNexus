@@ -93,7 +93,7 @@ def main() -> None:
                 print("DISTRIBUTION_STATUS=SUCCESS_NO_CHANGE")
                 return
             run(["git", "commit", "-m", "Update MatNexus distribution URL"], args.publish_repo)
-            run(["git", "-c", "core.sshCommand=ssh -p 443 -o StrictHostKeyChecking=accept-new", "push", "git@ssh.github.com:Wang-Ao-SCU/matnexus.git", "main"], args.publish_repo)
+            run(["git", "-c", "core.sshCommand=ssh -p 443 -o StrictHostKeyChecking=accept-new", "push", "git@ssh.github.com:Wang-Ao-SCU/MatNexus.git", "main"], args.publish_repo)
             print("DISTRIBUTION_STATUS=SUCCESS_PUSHED")
 
 
