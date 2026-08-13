@@ -35,7 +35,7 @@ start_streamlit() {
 start_cloudflared() {
   [ -x "$CLOUDFLARED" ] || { echo "EXTERNAL_STATUS=FAILED_CLOUDFLARED_MISSING"; exit 1; }
   : > "$LOG_DIR/cloudflared.log"
-  nohup "$CLOUDFLARED" tunnel --url http://127.0.0.1:8501 --no-autoupdate \
+  nohup "$CLOUDFLARED" tunnel --url http://127.0.0.1:8501 --protocol http2 --no-autoupdate \
     >"$LOG_DIR/cloudflared.log" 2>&1 &
   echo $! > "$LOG_DIR/cloudflared.pid"
 }
@@ -76,6 +76,13 @@ done
 
 if [ -z "$EXTERNAL_URL" ]; then
   echo "EXTERNAL_STATUS=FAILED_NO_URL"
+  echo "See $LOG_DIR/cloudflared.log"
+  exit 1
+fi
+
+if ! is_alive "$LOG_DIR/cloudflared.pid"; then
+  echo "EXTERNAL_STATUS=FAILED_TUNNEL_EXITED"
+  echo "EXTERNAL_URL=$EXTERNAL_URL"
   echo "See $LOG_DIR/cloudflared.log"
   exit 1
 fi
