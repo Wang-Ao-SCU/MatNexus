@@ -17,36 +17,55 @@ is_alive() {
   [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1
 }
 
+stop_pid_file() {
+  local pid_file="$1"
+  if is_alive "$pid_file"; then
+    kill "$(cat "$pid_file")" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+}
+
 start_streamlit() {
   echo "INTERNAL_STATUS=STARTING"
   (
     cd "$CHAPTER_DIR"
-    nohup env PYTHONPATH=.:conditional_formula_diffusion:unsupervised_autocg_formula:auto_pu_mlp \
+    PYTHONPATH=.:conditional_formula_diffusion:unsupervised_autocg_formula:auto_pu_mlp \
       streamlit run conditional_formula_diffusion/ui_hotpot_app.py \
       --server.address 0.0.0.0 \
       --server.port 8501 \
       --server.headless true \
-      --browser.gatherUsageStats false \
-      >"$LOG_DIR/streamlit.log" 2>&1 &
-    echo $! > "$LOG_DIR/streamlit.pid"
-  )
+      --browser.gatherUsageStats false
+  ) >"$LOG_DIR/streamlit.log" 2>&1 &
+  echo $! > "$LOG_DIR/streamlit.pid"
 }
 
 start_cloudflared() {
   [ -x "$CLOUDFLARED" ] || { echo "EXTERNAL_STATUS=FAILED_CLOUDFLARED_MISSING"; exit 1; }
   : > "$LOG_DIR/cloudflared.log"
-  nohup "$CLOUDFLARED" tunnel --url http://127.0.0.1:8501 --protocol http2 --no-autoupdate \
+  "$CLOUDFLARED" tunnel --url http://127.0.0.1:8501 --protocol http2 --no-autoupdate \
     >"$LOG_DIR/cloudflared.log" 2>&1 &
   echo $! > "$LOG_DIR/cloudflared.pid"
 }
 
+cleanup() {
+  echo "STOPPING_MATNEXUS_PUBLIC=TRUE"
+  stop_pid_file "$LOG_DIR/cloudflared.pid"
+  # Only stop Streamlit if this script started it in this run.
+  if [ "${STREAMLIT_STARTED:-0}" = "1" ]; then
+    stop_pid_file "$LOG_DIR/streamlit.pid"
+  fi
+}
+trap cleanup INT TERM
+
+STREAMLIT_STARTED=0
 if curl -fsS -I http://127.0.0.1:8501 >/dev/null 2>&1; then
   echo "INTERNAL_STATUS=ALREADY_RUNNING"
 else
   start_streamlit
+  STREAMLIT_STARTED=1
 fi
 
-for _ in $(seq 1 45); do
+for _ in $(seq 1 60); do
   curl -fsS -I http://127.0.0.1:8501 >/dev/null 2>&1 && break
   sleep 1
 done
@@ -59,12 +78,8 @@ fi
 
 echo "INTERNAL_URL=http://127.0.0.1:8501"
 
-# A quick Cloudflare tunnel can become stale after the terminal dies. Always
-# create a fresh tunnel for each publish run.
-if is_alive "$LOG_DIR/cloudflared.pid"; then
-  kill "$(cat "$LOG_DIR/cloudflared.pid")" >/dev/null 2>&1 || true
-  sleep 1
-fi
+# Always use a fresh quick tunnel URL.
+stop_pid_file "$LOG_DIR/cloudflared.pid"
 start_cloudflared
 
 EXTERNAL_URL=""
@@ -87,25 +102,16 @@ if ! is_alive "$LOG_DIR/cloudflared.pid"; then
   exit 1
 fi
 
-# Wait until the public URL can actually reach the local Streamlit backend.
-EXTERNAL_OK=0
-for _ in $(seq 1 45); do
-  if curl -fsS -I "$EXTERNAL_URL" >/dev/null 2>&1; then
-    EXTERNAL_OK=1
-    break
-  fi
-  sleep 2
-done
-
-if [ "$EXTERNAL_OK" -ne 1 ]; then
-  echo "EXTERNAL_STATUS=FAILED_HEALTH_CHECK"
-  echo "EXTERNAL_URL=$EXTERNAL_URL"
-  echo "See $LOG_DIR/cloudflared.log"
-  exit 1
-fi
-
-echo "EXTERNAL_STATUS=SUCCESS"
+echo "EXTERNAL_STATUS=STARTED"
 echo "EXTERNAL_URL=$EXTERNAL_URL"
+
+# DNS propagation of quick tunnels can lag. Do not terminate the tunnel just
+# because this local health check is slow; report the check result instead.
+if curl -fsS -I "$EXTERNAL_URL" >/dev/null 2>&1; then
+  echo "EXTERNAL_HEALTH=PASS"
+else
+  echo "EXTERNAL_HEALTH=WAIT_OR_CHECK_FROM_BROWSER"
+fi
 
 if python "$BASE_DIR/scripts/update_distribution_page.py" --url "$EXTERNAL_URL" --site-dir "$SITE_DIR" --publish-repo "$PUBLISH_REPO" --publish-subdir . --push; then
   echo "DISTRIBUTION_PUBLISH=SUCCESS"
@@ -117,4 +123,7 @@ fi
 
 echo "STREAMLIT_PID=$(cat "$LOG_DIR/streamlit.pid" 2>/dev/null || echo existing)"
 echo "CLOUDFLARED_PID=$(cat "$LOG_DIR/cloudflared.pid")"
-echo "MatNexus is running in the background. Stop it with: bash stop_matnexus_public.sh"
+echo "MatNexus is running. Keep this terminal open. Press Ctrl+C to stop the tunnel."
+
+# Keep the shell alive so account-less Cloudflare Tunnel does not become 1033.
+wait "$(cat "$LOG_DIR/cloudflared.pid")"
