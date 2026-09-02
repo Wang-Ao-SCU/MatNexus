@@ -28,8 +28,8 @@ bash start_and_publish.sh
 ```
 
 The script starts or detects the internal Streamlit service, starts a Cloudflare temporary tunnel, updates this repository's distribution page, and prints whether publishing succeeded.
-It also starts a lightweight watchdog that checks the local service, Cloudflare tunnel, and distribution URL every 120 seconds. If the public tunnel becomes unreachable, the watchdog confirms the failure 3 times at 20-second intervals, then restarts the tunnel and republishes the distribution page.
-Run this from a normal local terminal on the MatNexus host. Do not start the watchdog from an isolated sandbox because it must be able to see the host's `127.0.0.1:8501` service.
+By default, this is a manual restart workflow. It does not start the watchdog automatically.
+Run this from a normal local terminal on the MatNexus host.
 
 Expected output fields:
 
@@ -38,22 +38,44 @@ INTERNAL_URL=http://127.0.0.1:8501
 EXTERNAL_URL=https://*.trycloudflare.com
 DISTRIBUTION_PUBLISH=SUCCESS
 DISTRIBUTION_PAGE=https://wang-ao-scu.github.io/MatNexus/
-WATCHDOG_STATUS=STARTED
-WATCHDOG_INTERVAL_SECONDS=120
+WATCHDOG_STATUS=DISABLED_MANUAL_RESTART
 ```
 
-To use a different watchdog interval:
+## Optional Hourly Public Monitor
+
+If you want an independent process to check the public URL every hour and recover it automatically, run:
 
 ```bash
-MATNEXUS_WATCH_INTERVAL=60 bash start_and_publish.sh
+cd /media/wang/58AFBE741F4D5555/第四章/matnexus_public_page
+setsid ./monitor_matnexus_hourly.sh > logs/hourly_monitor.stdout.log 2>&1 < /dev/null &
+echo $! > logs/hourly_monitor.pid
+```
+
+The monitor reads `status.json`, tests the current public `trycloudflare.com` URL, and only if the public check fails after rechecks it runs:
+
+```bash
+bash stop_matnexus_public.sh
+bash start_and_publish.sh
+```
+
+Test once without starting the long-running monitor:
+
+```bash
+./monitor_matnexus_hourly.sh --once
+```
+
+To change the interval, for example to 30 minutes:
+
+```bash
+MATNEXUS_MONITOR_INTERVAL=1800 setsid ./monitor_matnexus_hourly.sh > logs/hourly_monitor.stdout.log 2>&1 < /dev/null &
+echo $! > logs/hourly_monitor.pid
 ```
 
 Useful runtime files:
 
 ```text
-logs/healthcheck.log
-logs/current_status.json
-logs/watchdog_restart.log
+logs/hourly_monitor.log
+logs/hourly_monitor.pid
 ```
 
 Stop processes started by the script:
