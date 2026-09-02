@@ -74,7 +74,12 @@ check_once() {
 
 needs_restart() {
   local result="$1"
-  [ "$result" = "PASS PASS PASS" ] && return 1
+  local local_status tunnel_status distribution_status
+  read -r local_status tunnel_status distribution_status <<< "$result"
+  # The GitHub Pages distribution page can lag behind the freshly pushed
+  # status.json. Treat that as degraded publishing, not as a reason to churn
+  # the live Cloudflare quick tunnel.
+  [ "$local_status" = "PASS" ] && [ "$tunnel_status" = "PASS" ] && return 1
   return 0
 }
 
@@ -86,7 +91,11 @@ while true; do
   read -r local_status tunnel_status distribution_status <<< "$result"
 
   if ! needs_restart "$result"; then
-    log "HEALTH=PASS url=$url"
+    if [ "$distribution_status" = "PASS" ]; then
+      log "HEALTH=PASS url=$url"
+    else
+      log "HEALTH=DEGRADED distribution=$distribution_status url=$url"
+    fi
     json_status "$local_status" "$tunnel_status" "$distribution_status" "$url" "none"
     sleep "$INTERVAL"
     continue
@@ -110,7 +119,11 @@ while true; do
     json_status "$local_status" "$tunnel_status" "$distribution_status" "$url" "restart"
     MATNEXUS_SKIP_WATCHDOG=1 MATNEXUS_WATCH_INTERVAL="$INTERVAL" bash "$BASE_DIR/start_and_publish.sh" >> "$LOG_DIR/watchdog_restart.log" 2>&1 || true
   else
-    log "HEALTH=PASS_AFTER_RECHECK url=$url"
+    if [ "$distribution_status" = "PASS" ]; then
+      log "HEALTH=PASS_AFTER_RECHECK url=$url"
+    else
+      log "HEALTH=DEGRADED_AFTER_RECHECK distribution=$distribution_status url=$url"
+    fi
     json_status "$local_status" "$tunnel_status" "$distribution_status" "$url" "none"
   fi
 

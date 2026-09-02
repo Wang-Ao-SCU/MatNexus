@@ -8,6 +8,7 @@ CLOUDFLARED="${CLOUDFLARED:-$CHAPTER_DIR/.local_tools/cloudflared}"
 LOG_DIR="$BASE_DIR/logs"
 SITE_DIR="$BASE_DIR/site"
 WATCHDOG_INTERVAL="${MATNEXUS_WATCH_INTERVAL:-120}"
+WATCHDOG_ENABLED="${MATNEXUS_ENABLE_WATCHDOG:-0}"
 mkdir -p "$LOG_DIR" "$SITE_DIR"
 
 is_alive() {
@@ -140,7 +141,7 @@ fi
 
 echo "STREAMLIT_PID=$(cat "$LOG_DIR/streamlit.pid" 2>/dev/null || echo existing)"
 echo "CLOUDFLARED_PID=$(cat "$LOG_DIR/cloudflared.pid")"
-if [ "${MATNEXUS_SKIP_WATCHDOG:-0}" != "1" ] && [ -x "$BASE_DIR/watch_matnexus_public.sh" ]; then
+if [ "$WATCHDOG_ENABLED" = "1" ] && [ "${MATNEXUS_SKIP_WATCHDOG:-0}" != "1" ] && [ -x "$BASE_DIR/watch_matnexus_public.sh" ]; then
   if [ -f "$LOG_DIR/watchdog.pid" ] && kill -0 "$(cat "$LOG_DIR/watchdog.pid" 2>/dev/null)" >/dev/null 2>&1; then
     echo "WATCHDOG_STATUS=ALREADY_RUNNING"
   else
@@ -150,6 +151,8 @@ if [ "${MATNEXUS_SKIP_WATCHDOG:-0}" != "1" ] && [ -x "$BASE_DIR/watch_matnexus_p
     echo "WATCHDOG_STATUS=STARTED"
     echo "WATCHDOG_INTERVAL_SECONDS=$WATCHDOG_INTERVAL"
   fi
+else
+  echo "WATCHDOG_STATUS=DISABLED_MANUAL_RESTART"
 fi
 echo "MatNexus is running in the background."
 echo "You may close this terminal. Use ./stop_matnexus_public.sh to stop the public tunnel."
