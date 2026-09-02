@@ -7,6 +7,7 @@ PUBLISH_REPO="${MATNEXUS_PUBLISH_REPO:-$BASE_DIR}"
 CLOUDFLARED="${CLOUDFLARED:-$CHAPTER_DIR/.local_tools/cloudflared}"
 LOG_DIR="$BASE_DIR/logs"
 SITE_DIR="$BASE_DIR/site"
+WATCHDOG_INTERVAL="${MATNEXUS_WATCH_INTERVAL:-120}"
 mkdir -p "$LOG_DIR" "$SITE_DIR"
 
 is_alive() {
@@ -25,52 +26,67 @@ stop_pid_file() {
   fi
 }
 
+curl_head() {
+  curl --noproxy "*" -fsS -I "$1" >/dev/null 2>&1
+}
+
+detect_8501_pid() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -ti :8501 2>/dev/null | head -n 1 || true
+  fi
+}
+
+stop_all_cloudflared() {
+  pkill -f "cloudflared tunnel --url http://127.0.0.1:8501" >/dev/null 2>&1 || true
+  sleep 1
+}
+
 start_streamlit() {
   echo "INTERNAL_STATUS=STARTING"
-  (
-    cd "$CHAPTER_DIR"
+  setsid bash -lc "
+    cd '$CHAPTER_DIR'
     PYTHONPATH=.:conditional_formula_diffusion:unsupervised_autocg_formula:auto_pu_mlp \
-      streamlit run conditional_formula_diffusion/ui_hotpot_app.py \
+      exec streamlit run conditional_formula_diffusion/ui_hotpot_app.py \
       --server.address 0.0.0.0 \
       --server.port 8501 \
       --server.headless true \
       --browser.gatherUsageStats false
-  ) >"$LOG_DIR/streamlit.log" 2>&1 &
+  " >"$LOG_DIR/streamlit.log" 2>&1 < /dev/null &
   echo $! > "$LOG_DIR/streamlit.pid"
 }
 
 start_cloudflared() {
   [ -x "$CLOUDFLARED" ] || { echo "EXTERNAL_STATUS=FAILED_CLOUDFLARED_MISSING"; exit 1; }
   : > "$LOG_DIR/cloudflared.log"
-  "$CLOUDFLARED" tunnel --url http://127.0.0.1:8501 --protocol http2 --no-autoupdate \
-    >"$LOG_DIR/cloudflared.log" 2>&1 &
+  setsid "$CLOUDFLARED" tunnel --url http://127.0.0.1:8501 --protocol http2 --no-autoupdate \
+    >"$LOG_DIR/cloudflared.log" 2>&1 < /dev/null &
   echo $! > "$LOG_DIR/cloudflared.pid"
 }
 
 cleanup() {
-  echo "STOPPING_MATNEXUS_PUBLIC=TRUE"
-  stop_pid_file "$LOG_DIR/cloudflared.pid"
-  # Only stop Streamlit if this script started it in this run.
-  if [ "${STREAMLIT_STARTED:-0}" = "1" ]; then
-    stop_pid_file "$LOG_DIR/streamlit.pid"
-  fi
+  echo "START_SCRIPT_INTERRUPTED=TRUE"
+  echo "Use ./stop_matnexus_public.sh if you want to stop MatNexus."
 }
 trap cleanup INT TERM
 
 STREAMLIT_STARTED=0
-if curl -fsS -I http://127.0.0.1:8501 >/dev/null 2>&1; then
+if curl_head http://127.0.0.1:8501; then
   echo "INTERNAL_STATUS=ALREADY_RUNNING"
+  existing_streamlit_pid="$(detect_8501_pid)"
+  if [ -n "$existing_streamlit_pid" ]; then
+    echo "$existing_streamlit_pid" > "$LOG_DIR/streamlit.pid"
+  fi
 else
   start_streamlit
   STREAMLIT_STARTED=1
 fi
 
 for _ in $(seq 1 60); do
-  curl -fsS -I http://127.0.0.1:8501 >/dev/null 2>&1 && break
+  curl_head http://127.0.0.1:8501 && break
   sleep 1
 done
 
-if ! curl -fsS -I http://127.0.0.1:8501 >/dev/null 2>&1; then
+if ! curl_head http://127.0.0.1:8501; then
   echo "INTERNAL_STATUS=FAILED"
   echo "See $LOG_DIR/streamlit.log"
   exit 1
@@ -80,6 +96,7 @@ echo "INTERNAL_URL=http://127.0.0.1:8501"
 
 # Always use a fresh quick tunnel URL.
 stop_pid_file "$LOG_DIR/cloudflared.pid"
+stop_all_cloudflared
 start_cloudflared
 
 EXTERNAL_URL=""
@@ -107,7 +124,7 @@ echo "EXTERNAL_URL=$EXTERNAL_URL"
 
 # DNS propagation of quick tunnels can lag. Do not terminate the tunnel just
 # because this local health check is slow; report the check result instead.
-if curl -fsS -I "$EXTERNAL_URL" >/dev/null 2>&1; then
+if curl_head "$EXTERNAL_URL"; then
   echo "EXTERNAL_HEALTH=PASS"
 else
   echo "EXTERNAL_HEALTH=WAIT_OR_CHECK_FROM_BROWSER"
@@ -123,7 +140,16 @@ fi
 
 echo "STREAMLIT_PID=$(cat "$LOG_DIR/streamlit.pid" 2>/dev/null || echo existing)"
 echo "CLOUDFLARED_PID=$(cat "$LOG_DIR/cloudflared.pid")"
-echo "MatNexus is running. Keep this terminal open. Press Ctrl+C to stop the tunnel."
-
-# Keep the shell alive so account-less Cloudflare Tunnel does not become 1033.
-wait "$(cat "$LOG_DIR/cloudflared.pid")"
+if [ "${MATNEXUS_SKIP_WATCHDOG:-0}" != "1" ] && [ -x "$BASE_DIR/watch_matnexus_public.sh" ]; then
+  if [ -f "$LOG_DIR/watchdog.pid" ] && kill -0 "$(cat "$LOG_DIR/watchdog.pid" 2>/dev/null)" >/dev/null 2>&1; then
+    echo "WATCHDOG_STATUS=ALREADY_RUNNING"
+  else
+    setsid bash -lc "MATNEXUS_WATCH_INTERVAL='$WATCHDOG_INTERVAL' exec '$BASE_DIR/watch_matnexus_public.sh'" \
+      >"$LOG_DIR/watchdog.log" 2>&1 < /dev/null &
+    echo $! > "$LOG_DIR/watchdog.pid"
+    echo "WATCHDOG_STATUS=STARTED"
+    echo "WATCHDOG_INTERVAL_SECONDS=$WATCHDOG_INTERVAL"
+  fi
+fi
+echo "MatNexus is running in the background."
+echo "You may close this terminal. Use ./stop_matnexus_public.sh to stop the public tunnel."
