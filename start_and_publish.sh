@@ -33,7 +33,7 @@ curl_head() {
 
 detect_8501_pid() {
   if command -v lsof >/dev/null 2>&1; then
-    lsof -ti :8501 2>/dev/null | head -n 1 || true
+    lsof -tiTCP:8501 -sTCP:LISTEN 2>/dev/null | head -n 1 || true
   fi
 }
 
@@ -136,7 +136,7 @@ if python "$BASE_DIR/scripts/update_distribution_page.py" --url "$EXTERNAL_URL" 
   echo "DISTRIBUTION_PAGE=https://wang-ao-scu.github.io/MatNexus/"
 else
   echo "DISTRIBUTION_PUBLISH=FAILED"
-  exit 1
+  echo "DISTRIBUTION_NOTE=Tunnel remains active; rerun publishing after network or Git synchronization recovers."
 fi
 
 echo "STREAMLIT_PID=$(cat "$LOG_DIR/streamlit.pid" 2>/dev/null || echo existing)"

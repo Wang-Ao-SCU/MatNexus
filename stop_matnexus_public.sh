@@ -13,7 +13,7 @@ for name in watchdog cloudflared streamlit; do
 done
 
 if command -v lsof >/dev/null 2>&1; then
-  for pid in $(lsof -ti :8501 2>/dev/null || true); do
+  for pid in $(lsof -tiTCP:8501 -sTCP:LISTEN 2>/dev/null || true); do
     kill "$pid" >/dev/null 2>&1 || true
     echo "Stopped 8501 listener PID $pid"
   done

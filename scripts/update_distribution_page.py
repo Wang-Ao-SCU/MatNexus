@@ -55,6 +55,23 @@ def run(cmd: list[str], cwd: Path) -> None:
     subprocess.run(cmd, cwd=cwd, text=True, check=True)
 
 
+def push_with_remote_sync(repo: Path) -> None:
+    ssh_command = "ssh -p 443 -o StrictHostKeyChecking=accept-new"
+    remote = "git@ssh.github.com:Wang-Ao-SCU/MatNexus.git"
+    push_cmd = ["git", "-c", f"core.sshCommand={ssh_command}", "push", remote, "main"]
+    first_push = subprocess.run(push_cmd, cwd=repo, text=True)
+    if first_push.returncode == 0:
+        return
+
+    print("DISTRIBUTION_PUSH_RETRY=SYNC_REMOTE")
+    run(
+        ["git", "-c", f"core.sshCommand={ssh_command}", "fetch", remote, "main"],
+        repo,
+    )
+    run(["git", "rebase", "--autostash", "FETCH_HEAD"], repo)
+    run(push_cmd, repo)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
@@ -93,7 +110,7 @@ def main() -> None:
                 print("DISTRIBUTION_STATUS=SUCCESS_NO_CHANGE")
                 return
             run(["git", "commit", "-m", "Update MatNexus distribution URL"], args.publish_repo)
-            run(["git", "-c", "core.sshCommand=ssh -p 443 -o StrictHostKeyChecking=accept-new", "push", "git@ssh.github.com:Wang-Ao-SCU/MatNexus.git", "main"], args.publish_repo)
+            push_with_remote_sync(args.publish_repo)
             print("DISTRIBUTION_STATUS=SUCCESS_PUSHED")
 
 
